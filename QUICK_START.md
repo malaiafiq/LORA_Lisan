@@ -3,6 +3,8 @@
 ## 🚀 Get Started in 3 Steps
 
 ### 1. Setup Environment
+
+#### For macOS/Linux:
 ```bash
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -12,16 +14,42 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+#### For Windows:
+```cmd
+# Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
 ### 2. Test Setup
+
+#### For macOS/Linux:
 ```bash
 # Verify everything is working
 python3 test_setup.py
 ```
 
+#### For Windows:
+```cmd
+# Verify everything is working
+python test_setup.py
+```
+
 ### 3. Start Training
+
+#### For macOS/Linux:
 ```bash
 # Run training with memory optimization
 PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 python3 train_whisper_lora.py
+```
+
+#### For Windows:
+```cmd
+# Run training
+python train_whisper_lora.py
 ```
 
 ## 📁 File Structure

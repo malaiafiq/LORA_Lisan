@@ -16,19 +16,34 @@ This project provides a complete setup for fine-tuning OpenAI's Whisper model us
 
 ### 1. Create Virtual Environment
 
+#### For macOS/Linux:
 ```bash
 # Create virtual environment
 python3 -m venv .venv
 
 # Activate virtual environment
-source .venv/bin/activate  # On macOS/Linux
-# or
-.venv\Scripts\activate  # On Windows
+source .venv/bin/activate
+```
+
+#### For Windows:
+```cmd
+# Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+.venv\Scripts\activate
 ```
 
 ### 2. Install Dependencies
 
+#### For macOS/Linux:
 ```bash
+# Install all required packages
+pip install -r requirements.txt
+```
+
+#### For Windows:
+```cmd
 # Install all required packages
 pip install -r requirements.txt
 ```
@@ -59,17 +74,29 @@ Create a JSON file with your audio-text pairs in the following format:
 Edit the `DATA_JSON_PATH` variable in `train_whisper_lora.py`:
 
 ```python
-DATA_JSON_PATH = "/path/to/your/dataset.json"
+DATA_JSON_PATH = "/path/to/your/dataset.json"  # macOS/Linux
+# or
+DATA_JSON_PATH = "C:\\path\\to\\your\\dataset.json"  # Windows
 ```
 
 ### 2. Run Training
 
+#### For macOS/Linux:
 ```bash
 # Activate virtual environment
 source .venv/bin/activate
 
 # Run training with memory optimization for Apple Silicon
 PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 python3 train_whisper_lora.py
+```
+
+#### For Windows:
+```cmd
+# Activate virtual environment
+.venv\Scripts\activate
+
+# Run training (Windows doesn't need MPS optimization)
+python train_whisper_lora.py
 ```
 
 ## Training Configuration
@@ -118,16 +145,21 @@ Model saved to: checkpoints
 
 ## Memory Optimization
 
-For Apple Silicon (M1/M2) Macs, the script includes:
-
+### For Apple Silicon (M1/M2) Macs:
 - **MPS Backend**: Automatic GPU acceleration
 - **Memory Management**: Optimized batch sizes and data loading
 - **8-bit Quantization**: Optional memory reduction (requires CUDA-compatible bitsandbytes)
+
+### For Windows:
+- **CUDA Support**: Automatic GPU acceleration if CUDA is available
+- **CPU Fallback**: Works on CPU if no GPU is available
+- **8-bit Quantization**: Available for CUDA systems with proper bitsandbytes installation
 
 ## Troubleshooting
 
 ### Common Issues
 
+#### For macOS/Linux:
 1. **MPS Out of Memory**:
    ```bash
    # Use memory optimization
@@ -140,15 +172,38 @@ For Apple Silicon (M1/M2) Macs, the script includes:
    pip install -r requirements.txt
    ```
 
-3. **Audio Loading Errors**:
+#### For Windows:
+1. **CUDA Out of Memory**:
+   ```cmd
+   # Reduce batch size in training script
+   # Or use CPU-only mode
+   python train_whisper_lora.py
+   ```
+
+2. **Python Path Issues**:
+   ```cmd
+   # Use full path to python
+   C:\Python39\python.exe train_whisper_lora.py
+   ```
+
+3. **Missing Dependencies**:
+   ```cmd
+   # Reinstall requirements
+   pip install -r requirements.txt
+   ```
+
+#### General Issues:
+4. **Audio Loading Errors**:
    - Ensure audio files are in supported formats (WAV, MP3, etc.)
    - Check file paths in your JSON are correct
+   - Use forward slashes `/` in paths for cross-platform compatibility
 
 ### Performance Tips
 
 - **Smaller Dataset**: Start with 50-100 samples for testing
 - **Reduce Epochs**: Use 3-5 epochs for initial experiments
 - **Monitor Memory**: Watch system memory usage during training
+- **Platform-Specific**: Use appropriate commands for your operating system
 
 ## File Structure
 
@@ -163,10 +218,32 @@ Lora_whisper/
 
 ## Requirements
 
-- Python 3.8+
-- 8GB+ RAM (16GB+ recommended)
-- Apple Silicon Mac (M1/M2) or CUDA-compatible GPU
-- Audio files in supported formats (WAV, MP3, FLAC, etc.)
+### System Requirements:
+- **Python**: 3.8+ (Python 3.9+ recommended)
+- **RAM**: 8GB+ (16GB+ recommended)
+- **Storage**: 2GB+ free space for model and dependencies
+
+### Platform-Specific Requirements:
+
+#### For macOS:
+- **Apple Silicon**: M1/M2 Mac (recommended for MPS acceleration)
+- **Intel Mac**: Supported but may be slower
+- **Audio Support**: Built-in audio libraries
+
+#### For Windows:
+- **GPU**: CUDA-compatible GPU (NVIDIA) for acceleration
+- **CPU**: Modern multi-core processor (Intel/AMD)
+- **Audio Support**: May require additional audio codecs
+
+#### For Linux:
+- **GPU**: CUDA-compatible GPU (NVIDIA) for acceleration
+- **CPU**: Modern multi-core processor
+- **Audio Support**: ALSA/PulseAudio for audio processing
+
+### Audio File Requirements:
+- **Formats**: WAV, MP3, FLAC, M4A, WMA
+- **Sample Rate**: 16kHz (automatically resampled)
+- **Channels**: Mono or stereo (automatically converted)
 
 ## Advanced Configuration
 
