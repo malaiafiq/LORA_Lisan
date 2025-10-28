@@ -1,0 +1,52 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Model checkpoints and outputs
+checkpoints/
+checkpoints_*/
+*.pth
+*.pt
+*.bin
+*.safetensors
+
+# Data files (keep example_data.json)
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.wma
+data/
+datasets/
+
+# Logs and temporary files
+*.log
+logs/
+wandb/
+tensorboard/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local
