@@ -1,326 +1,256 @@
-# Whisper LoRA Fine-tuning
+# Enhanced Whisper LoRA Fine-tuning Script
 
-This project provides a complete setup for fine-tuning OpenAI's Whisper model using LoRA (Low-Rank Adaptation) for efficient parameter-efficient fine-tuning on custom speech recognition datasets.
+This repository contains an enhanced version of the Whisper LoRA fine-tuning script with comprehensive timing, progress tracking, and performance metrics based on the reference implementation from `whisper_finetune_with_timing.py`.
 
 ## Features
 
+### 🚀 Enhanced Training Features
 - **LoRA Fine-tuning**: Efficient fine-tuning using Low-Rank Adaptation
-- **8-bit Quantization**: Memory-efficient training with optional 8-bit quantization
-- **Automatic Data Splitting**: 90:10 train/test split from single JSON file
-- **WER Evaluation**: Built-in Word Error Rate calculation during and after training
-- **Early Stopping**: Prevents overfitting with automatic training termination (via callback)
-- **Progress Table Output**: Clear per-epoch table of Train/Eval losses and WER
-- **MPS Support**: Optimized for Apple Silicon (M1/M2) GPUs
-- **Flexible Data Format**: Supports both 'text' and 'transcript' keys in JSON
+- **8-bit Quantization**: Memory-efficient training with BitsAndBytesConfig
+- **Mixed Precision**: FP16 training for faster training and reduced memory usage
+- **Early Stopping**: Prevents overfitting with configurable patience
 
-## Setup
+### 📊 Comprehensive Monitoring
+- **Execution Timer**: Detailed timing for each training step
+- **Memory Monitoring**: Real-time memory usage tracking
+- **Progress Table**: Comprehensive training progress visualization
+- **Performance Metrics**: WER (Word Error Rate) tracking and comparison
+- **Baseline Evaluation**: Pre-training model performance assessment
 
-### 1. Create Virtual Environment
+### 🎯 Training Progress Tracking
+- **Real-time Progress**: Step-by-step execution logging
+- **Epoch-by-Epoch Metrics**: Training loss, validation loss, and WER tracking
+- **Performance Comparison**: Baseline vs final model performance
+- **Training Statistics**: Comprehensive training summary
 
-#### For macOS/Linux:
+## Installation
+
+### 1. Set up Virtual Environment
 ```bash
+# Navigate to the project directory
+cd "D:\Afiq.hamidon\Lisan V2\Lora-Lisan\LORA_Lisan-main"
+
 # Create virtual environment
-python3 -m venv .venv
+python -m venv venv
 
-# Activate virtual environment
-source .venv/bin/activate
-```
+# Activate virtual environment (Windows)
+.\venv\Scripts\Activate.ps1
 
-#### For Windows:
-```cmd
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
-.venv\Scripts\activate
+# Or for Command Prompt
+.\venv\Scripts\activate.bat
 ```
 
 ### 2. Install Dependencies
-
-#### For macOS/Linux:
 ```bash
-# Install all required packages
+# Install from requirements.txt
 pip install -r requirements.txt
+
+# Or install manually
+pip install torch torchvision torchaudio transformers datasets peft accelerate bitsandbytes evaluate librosa scikit-learn tqdm psutil
 ```
-
-#### For Windows:
-```cmd
-# Install all required packages
-pip install -r requirements.txt
-```
-
-### 3. Prepare Your Data
-
-Create a JSON file with your audio-text pairs in the following format:
-
-```json
-[
-  {
-    "audio_path": "/path/to/audio1.wav",
-    "text": "Your transcription text here"
-  },
-  {
-    "audio_path": "/path/to/audio2.wav", 
-    "transcript": "Alternative key name for transcription"
-  }
-]
-```
-
-**Note**: The script supports both `"text"` and `"transcript"` keys for flexibility.
 
 ## Usage
 
-### 1. Update Data Path
-
-Edit the `DATA_JSON_PATH` variable in `train_whisper_lora.py`:
-
-```python
-DATA_JSON_PATH = "/path/to/your/dataset.json"  # macOS/Linux
-# or
-DATA_JSON_PATH = "C:\\path\\to\\your\\dataset.json"  # Windows
-```
-
-### 2. Run Training
-
-#### For macOS/Linux:
+### Basic Usage
 ```bash
 # Activate virtual environment
-source .venv/bin/activate
+.\venv\Scripts\Activate.ps1
 
-# Run training with memory optimization for Apple Silicon
-PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 python3 train_whisper_lora.py
+# Run the enhanced training script
+python train_whisper_lora_enhanced_simple.py
 ```
 
-#### For Windows:
-```cmd
-# Activate virtual environment
-.venv\Scripts\activate
+### Configuration
+Before running, update the configuration in the script:
 
-# Run training (Windows doesn't need MPS optimization)
-python train_whisper_lora.py
+```python
+# Update these paths in the main() function
+DATA_JSON_PATH = "D:\Afiq.hamidon\Lisan V2\organized_dataset.json"  # Your dataset path
+OUTPUT_DIR = "D:/Afiq.hamidon/Lisan V2/Fin_tune_model"  # Output directory
 ```
+
+### Dataset Format
+Your dataset should be a JSON file with the following structure:
+```json
+[
+    {
+        "audio_path": "path/to/audio1.wav",
+        "text": "Transcription text for audio1"
+    },
+    {
+        "audio_path": "path/to/audio2.wav", 
+        "text": "Transcription text for audio2"
+    }
+]
+```
+
+## Scripts Overview
+
+### Main Scripts
+- `train_whisper_lora_enhanced_simple.py` - Main enhanced training script (Windows-compatible)
+- `train_whisper_lora_enhanced.py` - Original enhanced script with Unicode characters
+- `train_whisper_lora.py` - Original LoRA training script
+
+### Test Scripts
+- `test_simple.py` - Simple test script for basic functionality
+- `test_enhanced_training.py` - Comprehensive test script
+
+### Configuration Files
+- `requirements.txt` - Python dependencies
+- `README.md` - This documentation
+
+## Key Features Implementation
+
+### 1. ExecutionTimer Class
+```python
+timer = ExecutionTimer()
+timer.start_step("Loading Data")
+# ... your code ...
+timer.end_step()
+timer.print_summary()
+```
+
+### 2. TrainingProgressCallback
+```python
+progress_callback = TrainingProgressCallback()
+progress_callback.set_processor_and_dataset(processor, eval_dataset)
+progress_callback.set_baseline_wer(baseline_wer)
+```
+
+### 3. Progress Table Display
+The script automatically displays:
+- Epoch-by-epoch training progress
+- Training and validation losses
+- WER metrics
+- Performance comparison (baseline vs final)
+
+### 4. Performance Metrics
+- **WER Calculation**: Word Error Rate for model evaluation
+- **Baseline Assessment**: Pre-training model performance
+- **Improvement Tracking**: Performance improvement over training
+- **Memory Usage**: Real-time memory monitoring
 
 ## Training Configuration
 
-The script uses the following optimized settings:
+### Default Parameters
+- **Model**: `openai/whisper-base`
+- **Language**: `ms` (Malay)
+- **Task**: `transcribe`
+- **LoRA Rank**: 16
+- **LoRA Alpha**: 32
+- **Learning Rate**: 5e-5
+- **Batch Size**: 1 (with gradient accumulation)
+- **Epochs**: 10
+- **Evaluation Steps**: 25
 
-- **Model**: `openai/whisper-base` (Malay language)
-- **LoRA Rank**: 16 (balanced efficiency and performance)
-- **Learning Rate**: 5e-5 (stable training)
-- **Batch Size**: 1 (memory efficient)
-- **Gradient Accumulation**: 8 steps
-- **Epochs**: 10 (maximum, with early stopping)
-- **Early Stopping**: 3 evaluations without improvement
-- **Evaluation**: Every 25 steps
-- **Checkpointing**: Every 25 steps
+### Customization
+You can modify these parameters in the `main()` function:
+
+```python
+# LoRA Configuration
+config = LoraConfig(
+    r=16,  # Rank of LoRA decomposition
+    lora_alpha=32,  # Scaling factor
+    target_modules=["q_proj", "v_proj"],  # Target modules
+    lora_dropout=0.1,  # Dropout rate
+    bias="none",  # Bias adaptation
+)
+
+# Training Arguments
+training_args = Seq2SeqTrainingArguments(
+    output_dir=OUTPUT_DIR,
+    per_device_train_batch_size=1,
+    gradient_accumulation_steps=8,
+    learning_rate=5e-5,
+    num_train_epochs=10,
+    # ... other parameters
+)
+```
 
 ## Output
 
 ### Training Progress
-
-The script now prints a comprehensive progress table after training:
-
+The script provides real-time feedback:
 ```
-🏋️  TRAINING PROGRESS TABLE:
+[START] Loading and splitting dataset
+Time: 08:51:34
+[DONE] Loading and splitting dataset
+Duration: 2.3s
+Memory: 512.4 MB
+```
+
+### Progress Table
+```
+TRAINING PROGRESS TABLE
+================================================================================
+Epoch    Training Loss   Validation Loss  Validation WER  
 --------------------------------------------------------------------------------
-Epoch    Training Loss   Validation Loss  Validation WER
---------------------------------------------------------------------------------
-1.0      2.4446          2.1129           2.9520
-2.0      2.0675          1.9913           2.9520
-3.0      1.8157          1.9153           2.9520
-4.0      1.6420          1.8498           3.6531
---------------------------------------------------------------------------------
-FINAL    1.6420          1.8498           3.6531
+1.0      2.3456         2.1234          0.4567          
+2.0      1.9876         1.8765          0.3456          
+...
+FINAL    0.1234         0.2345          0.1234          
 ```
 
-During training you will also see step-wise logs; evaluation runs every 25 steps.
-
-### Model Checkpoints
-
-- **Location**: `checkpoints/` directory
-- **Best Model**: Automatically loaded at the end
-- **Checkpoint Limit**: 3 most recent checkpoints saved
-
-### Final WER Report
-
-After training completes, you'll see:
-
+### Performance Metrics
 ```
-==================================================
-COMPUTING FINAL WER METRICS
-==================================================
+PERFORMANCE METRICS
+================================================================================
 
-FINAL RESULTS:
-Word Error Rate (WER): 0.1234 (12.34%)
-Model saved to: checkpoints
-==================================================
+PERFORMANCE METRICS:
+----------------------------------------
+Word Error Rate (WER):
+  * Baseline:  0.4567
+  * Final:     0.1234
+  * Change:    +0.3333 (Improved)
+
+TRAINING STATISTICS:
+----------------------------------------
+Total Epochs: 10
+Total Steps: 150
+Evaluation Epochs: 10
 ```
-
-## Early Stopping
-
-Early stopping is configured via the `EarlyStoppingCallback` (not via `Seq2SeqTrainingArguments`). Current defaults:
-
-- Patience: 3 evaluations
-- Threshold: 0.001 minimum improvement
-- Metric: `eval_loss` (lower is better)
-
-Implementation snippet:
-
-```python
-from transformers import EarlyStoppingCallback
-
-trainer = Seq2SeqTrainer(
-    args=training_args,
-    model=model,
-    # ...
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.001)],
-)
-```
-
-## Memory Optimization
-
-### For Apple Silicon (M1/M2) Macs:
-- **MPS Backend**: Automatic GPU acceleration
-- **Memory Management**: Optimized batch sizes and data loading
-- **8-bit Quantization**: Optional memory reduction (requires CUDA-compatible bitsandbytes)
-
-### For Windows:
-- **CUDA Support**: Automatic GPU acceleration if CUDA is available
-- **CPU Fallback**: Works on CPU if no GPU is available
-- **8-bit Quantization**: Available for CUDA systems with proper bitsandbytes installation
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### For macOS/Linux:
-1. **MPS Out of Memory**:
-   ```bash
-   # Use memory optimization
-   PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 python3 train_whisper_lora.py
-   ```
+1. **Unicode Errors**: Use `train_whisper_lora_enhanced_simple.py` for Windows compatibility
+2. **Memory Issues**: Reduce batch size or enable gradient accumulation
+3. **CUDA Issues**: The script automatically falls back to CPU if CUDA is not available
+4. **Dataset Loading**: Ensure your JSON file has the correct format
 
-2. **Missing Dependencies**:
-   ```bash
-   # Reinstall requirements
-   pip install -r requirements.txt
-   ```
+### Testing
+Run the test script to verify installation:
+```bash
+python test_simple.py
+```
 
-#### For Windows:
-1. **CUDA Out of Memory**:
-   ```cmd
-   # Reduce batch size in training script
-   # Or use CPU-only mode
-   python train_whisper_lora.py
-   ```
+## Performance Tips
 
-2. **Python Path Issues**:
-   ```cmd
-   # Use full path to python
-   C:\Python39\python.exe train_whisper_lora.py
-   ```
-
-3. **Missing Dependencies**:
-   ```cmd
-   # Reinstall requirements
-   pip install -r requirements.txt
-   ```
-
-#### General Issues:
-4. **Audio Loading Errors**:
-   - Ensure audio files are in supported formats (WAV, MP3, etc.)
-   - Check file paths in your JSON are correct
-   - Use forward slashes `/` in paths for cross-platform compatibility
-
-### Performance Tips
-
-- **Smaller Dataset**: Start with 50-100 samples for testing
-- **Reduce Epochs**: Use 3-5 epochs for initial experiments
-- **Monitor Memory**: Watch system memory usage during training
-- **Platform-Specific**: Use appropriate commands for your operating system
+1. **Use GPU**: Ensure CUDA is available for faster training
+2. **Memory Management**: Use 8-bit quantization for memory efficiency
+3. **Batch Size**: Adjust based on available memory
+4. **Gradient Accumulation**: Use to simulate larger batch sizes
+5. **Early Stopping**: Prevents overfitting and saves time
 
 ## File Structure
 
 ```
-Lora_whisper/
-├── train_whisper_lora.py    # Main training script
-├── requirements.txt         # Python dependencies
-├── README.md               # This documentation
-├── example_data.json       # Sample data format
-└── checkpoints/            # Model checkpoints (created during training)
+LORA_Lisan-main/
+├── train_whisper_lora_enhanced_simple.py  # Main enhanced script
+├── train_whisper_lora_enhanced.py         # Original enhanced script
+├── train_whisper_lora.py                  # Original LoRA script
+├── test_simple.py                         # Simple test script
+├── test_enhanced_training.py              # Comprehensive test script
+├── requirements.txt                       # Dependencies
+├── README.md                              # This file
+└── venv/                                  # Virtual environment
 ```
 
-## Requirements
+## Contributing
 
-### System Requirements:
-- **Python**: 3.8+ (Python 3.9+ recommended)
-- **RAM**: 8GB+ (16GB+ recommended)
-- **Storage**: 2GB+ free space for model and dependencies
-
-### Platform-Specific Requirements:
-
-#### For macOS:
-- **Apple Silicon**: M1/M2 Mac (recommended for MPS acceleration)
-- **Intel Mac**: Supported but may be slower
-- **Audio Support**: Built-in audio libraries
-
-#### For Windows:
-- **GPU**: CUDA-compatible GPU (NVIDIA) for acceleration
-- **CPU**: Modern multi-core processor (Intel/AMD)
-- **Audio Support**: May require additional audio codecs
-
-#### For Linux:
-- **GPU**: CUDA-compatible GPU (NVIDIA) for acceleration
-- **CPU**: Modern multi-core processor
-- **Audio Support**: ALSA/PulseAudio for audio processing
-
-### Audio File Requirements:
-- **Formats**: WAV, MP3, FLAC, M4A, WMA
-- **Sample Rate**: 16kHz (automatically resampled)
-- **Channels**: Mono or stereo (automatically converted)
-
-## Advanced Configuration
-
-### Custom LoRA Parameters
-
-Edit the LoRA configuration in `train_whisper_lora.py`:
-
-```python
-config = LoraConfig(
-    r=16,  # Rank (higher = more parameters, lower = more efficient)
-    lora_alpha=32,  # Scaling factor
-    target_modules=["q_proj", "v_proj"],  # Which layers to adapt
-    lora_dropout=0.1,  # Dropout rate
-    bias="none",  # Bias adaptation
-)
-```
-
-### Training Parameters
-
-Modify `Seq2SeqTrainingArguments` for different training strategies:
-
-```python
-training_args = Seq2SeqTrainingArguments(
-    learning_rate=5e-5,  # Adjust learning rate
-    num_train_epochs=10,  # Maximum number of epochs
-    per_device_train_batch_size=1,  # Batch size
-    gradient_accumulation_steps=8,  # Gradient accumulation
-    # Early stopping parameters
-    early_stopping_patience=3,  # Stop if no improvement for 3 evaluations
-    early_stopping_threshold=0.001,  # Minimum improvement threshold
-    # ... other parameters
-)
-```
-
-### Early Stopping Configuration
-
-The early stopping mechanism helps prevent overfitting:
-
-- **Patience**: Number of evaluations to wait for improvement (default: 3)
-- **Threshold**: Minimum improvement required (default: 0.001)
-- **Metric**: Uses `eval_loss` to determine improvement
-- **Behavior**: Training stops automatically when no improvement is detected
+Feel free to contribute improvements to the training script, add new features, or fix issues.
 
 ## License
 
-This project is for educational and research purposes. Please respect OpenAI's Whisper model license terms.
+This project follows the same license as the original Whisper model and Hugging Face Transformers library.

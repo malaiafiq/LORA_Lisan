@@ -15,6 +15,44 @@ from tqdm import tqdm
 import os
 
 
+def compute_baseline_wer(model, processor, eval_dataset, device, sample_size: int = 10) -> float:
+    """Compute a baseline WER on a small subset before training, similar to the reference script."""
+    wer_metric = evaluate.load("wer")
+    model.eval()
+    predictions: List[str] = []
+    references: List[str] = []
+
+    if len(eval_dataset) == 0:
+        return 1.0
+
+    size = min(sample_size, len(eval_dataset))
+    indices = np.random.choice(len(eval_dataset), size, replace=False)
+
+    with torch.no_grad():
+        for idx in indices:
+            item = eval_dataset[idx]
+            audio_path = item['audio_path']
+            reference_text = item.get('text', item.get('transcript', ''))
+            if not reference_text:
+                continue
+            try:
+                audio_array, _ = librosa.load(audio_path, sr=16000)
+                input_features = processor.feature_extractor(
+                    audio_array,
+                    sampling_rate=16000,
+                    return_tensors="pt"
+                ).input_features.to(device)
+                predicted_ids = model.generate(input_features, max_length=128)
+                prediction = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+                predictions.append(prediction)
+                references.append(reference_text)
+            except Exception:
+                continue
+
+    if len(predictions) == 0 or len(references) == 0:
+        return 1.0
+    return wer_metric.compute(predictions=predictions, references=references)
+
 class TrainingProgressCallback(TrainerCallback):
     """Custom callback to track and display training progress in a formatted table."""
     
@@ -24,15 +62,20 @@ class TrainingProgressCallback(TrainerCallback):
         self.wer_metric = evaluate.load("wer")
         
     def on_log(self, args, state, control, model=None, logs=None, **kwargs):
-        """Capture training and evaluation logs."""
+        """Capture training and evaluation logs.
+
+        Note: Hugging Face Trainer emits 'loss' for training steps (not 'train_loss').
+        """
         if logs is not None:
-            if 'train_loss' in logs:
+            # Capture training loss from 'loss'
+            if 'loss' in logs:
                 self.training_logs.append({
                     'epoch': logs.get('epoch', 0),
-                    'train_loss': logs.get('train_loss', 0),
+                    'train_loss': logs.get('loss', 0),
                     'step': logs.get('step', 0)
                 })
-            if 'eval_loss' in logs:
+            # Capture evaluation metrics
+            if 'eval_loss' in logs or 'eval_wer' in logs:
                 self.eval_logs.append({
                     'epoch': logs.get('epoch', 0),
                     'eval_loss': logs.get('eval_loss', 0),
@@ -112,7 +155,7 @@ class TrainingProgressCallback(TrainerCallback):
         """Display the training progress table."""
         print("\n" + "🏋️  TRAINING PROGRESS TABLE:")
         print("-" * 80)
-        print(f"{'Epoch':<8} {'Training Loss':<15} {'Validation Loss':<15} {'Validation WER':<15}")
+        print(f"{'Epoch':<8} {'Training Loss':<15} {'Validation Loss':<16} {'Validation WER':<15}")
         print("-" * 80)
         
         # Group logs by epoch
@@ -135,14 +178,14 @@ class TrainingProgressCallback(TrainerCallback):
             eval_loss = data.get('eval_loss', 0.0)
             eval_wer = data.get('eval_wer', 0.0)
             
-            print(f"{epoch:<8.1f} {train_loss:<15.4f} {eval_loss:<15.4f} {eval_wer:<15.4f}")
+            print(f"{epoch:<8.1f} {train_loss:<15.4f} {eval_loss:<16.4f} {eval_wer:<15.4f}")
         
         # Display final results
         if epoch_data:
             final_epoch = max(epoch_data.keys())
             final_data = epoch_data[final_epoch]
             print("-" * 80)
-            print(f"{'FINAL':<8} {final_data.get('train_loss', 0.0):<15.4f} {final_data.get('eval_loss', 0.0):<15.4f} {final_data.get('eval_wer', 0.0):<15.4f}")
+            print(f"{'FINAL':<8} {final_data.get('train_loss', 0.0):<15.4f} {final_data.get('eval_loss', 0.0):<16.4f} {final_data.get('eval_wer', 0.0):<15.4f}")
             print("-" * 80)
 
 
@@ -451,6 +494,14 @@ def main():
     # Disable caching to avoid warnings during training
     model.config.use_cache = False
 
+    # Baseline evaluation before training (to match reference output)
+    print("\n" + "="*50)
+    print("BASELINE EVALUATION")
+    print("="*50)
+    device = next(model.parameters()).device
+    baseline_wer = compute_baseline_wer(model, processor, test_data, device, sample_size=10)
+    print(f"📊 Baseline WER: {baseline_wer:.4f}")
+
     # Start training
     print("Starting LoRA fine-tuning...")
     trainer.train()
@@ -463,13 +514,24 @@ def main():
     print("COMPUTING FINAL WER METRICS")
     print("="*50)
     
-    device = next(model.parameters()).device
     final_wer = compute_wer_metrics(model, processor, test_data, device)
     
     print(f"\nFINAL RESULTS:")
     print(f"Word Error Rate (WER): {final_wer:.4f} ({final_wer*100:.2f}%)")
     print(f"Model saved to: {training_args.output_dir}")
     print("="*50)
+
+    # Performance metrics summary (align with reference-style output)
+    print("\n" + "="*80)
+    print("🎯 TRAINING RESULTS SUMMARY")
+    print("="*80)
+    print(f"\n📊 PERFORMANCE METRICS:")
+    print("-" * 40)
+    wer_improvement = baseline_wer - final_wer
+    print("Word Error Rate (WER):")
+    print(f"  • Baseline:  {baseline_wer:.4f}")
+    print(f"  • Final:     {final_wer:.4f}")
+    print(f"  • Change:    {wer_improvement:+.4f} ({'✅ Improved' if wer_improvement > 0 else '❌ Degraded'})")
 
 
 if __name__ == "__main__":
