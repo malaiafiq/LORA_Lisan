@@ -13,6 +13,32 @@ from sklearn.model_selection import train_test_split
 import evaluate
 from tqdm import tqdm
 import os
+import warnings
+
+# Suppress BitsAndBytes dtype casting warning (informational)
+warnings.filterwarnings("ignore", message=".*MatMul8bitLt: inputs will be cast.*")
+
+# Cross-OS path normalization
+def _normalize_path_for_current_os(file_path: str) -> str:
+    """Normalize dataset audio paths between Windows and POSIX/WSL.
+
+    Examples:
+      - On POSIX/WSL: 'D:\\dir\\file.mp3' -> '/mnt/d/dir/file.mp3'
+      - On Windows: keep original
+    """
+    if not isinstance(file_path, str) or len(file_path) < 2:
+        return file_path
+    # If running on POSIX (Linux/WSL) and path looks like a Windows drive path
+    if os.name != "nt":
+        # Detect patterns like 'C:\\...' or 'D:\\...'
+        if len(file_path) >= 3 and file_path[1] == ':' and (file_path[2] == '\\' or file_path[2] == '/'):
+            drive_letter = file_path[0].lower()
+            remainder = file_path[3:].replace('\\', '/').lstrip('/')
+            return f"/mnt/{drive_letter}/{remainder}"
+        # Also handle backslashes generally on POSIX
+        return file_path.replace('\\', '/')
+    # On Windows, return as-is
+    return file_path
 
 
 class TrainingProgressCallback(TrainerCallback):
@@ -160,7 +186,7 @@ class TrainingProgressCallback(TrainerCallback):
             with torch.no_grad():
                 for idx in range(len(self.eval_dataset)):
                     item = self.eval_dataset[idx]
-                    audio_path = item['audio_path']
+                    audio_path = _normalize_path_for_current_os(item['audio_path'])
                     reference_text = item.get('text', item.get('transcript', ''))
                     
                     if not reference_text:
@@ -224,9 +250,9 @@ class TrainingProgressCallback(TrainerCallback):
         print("-" * 80)
         
         # Debug: Print what's in eval_logs
-        print(f"DEBUG: eval_logs has {len(self.eval_logs)} entries")
-        for i, log in enumerate(self.eval_logs):
-            print(f"  Entry {i}: epoch={log.get('epoch')}, eval_loss={log.get('eval_loss', 0):.4f}, eval_wer={log.get('eval_wer', 0):.4f}")
+       # print(f"DEBUG: eval_logs has {len(self.eval_logs)} entries")
+       # for i, log in enumerate(self.eval_logs):
+       #     print(f"  Entry {i}: epoch={log.get('epoch')}, eval_loss={log.get('eval_loss', 0):.4f}, eval_wer={log.get('eval_wer', 0):.4f}")
         
         # Group logs by epoch - process in reverse to get latest values if duplicates exist
         epoch_data = {}
@@ -320,23 +346,57 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             return_tensors="pt"
         )
 
-        # Pad text labels
-        labels = [{"input_ids": feat["labels"]} for feat in features]
+        # Create attention mask for input_features based on actual feature lengths
+        # Get the original lengths before padding
+        feature_lengths = []
+        for feat in features:
+            feat_tensor = feat["input_features"]
+            if isinstance(feat_tensor, torch.Tensor):
+                feature_lengths.append(feat_tensor.shape[-1])
+            elif isinstance(feat_tensor, list):
+                feature_lengths.append(len(feat_tensor[0]) if feat_tensor else 0)
+            else:
+                # Fallback: use the padded batch shape
+                feature_lengths.append(batch["input_features"].shape[-1])
+        
+        max_length = batch["input_features"].shape[-1]
+        
+        # Create attention mask: 1 for real features, 0 for padding
+        attention_mask = torch.zeros((len(features), max_length), dtype=torch.long)
+        for i, length in enumerate(feature_lengths):
+            if length > 0:
+                attention_mask[i, :length] = 1
+        
+        batch["attention_mask"] = attention_mask
+
+        # Pad text labels - use tokenizer __call__ method for fast tokenizers
+        # Labels are already token IDs (list of ints), so we need to pad them
+        labels = [feat["labels"] for feat in features]
+        # For fast tokenizers with already tokenized sequences, use pad with proper format
         labels_batch = self.processor.tokenizer.pad(
-            labels,
+            {"input_ids": labels},
             padding=True,
-            return_tensors="pt"
+            return_tensors="pt",
+            return_attention_mask=True
         )
 
         # Replace padding token IDs with -100 so they are ignored in loss computation
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
 
         # Optionally remove BOS token if present at the beginning
+        removed_bos = False
         if (
             labels.size(1) > 1
             and (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item()
         ):
             labels = labels[:, 1:]
+            removed_bos = True
+        
+        # Also adjust decoder attention mask if we removed BOS token
+        if removed_bos and "attention_mask" in labels_batch:
+            batch["decoder_attention_mask"] = labels_batch["attention_mask"][:, 1:]
+        elif "attention_mask" in labels_batch:
+            batch["decoder_attention_mask"] = labels_batch["attention_mask"]
 
         batch["labels"] = labels
         return batch
@@ -357,8 +417,14 @@ class AudioTextDataset(Dataset):
         item = self.data[idx]
         
         # Load audio file
-        audio_path = item['audio_path']
+        audio_path = _normalize_path_for_current_os(item['audio_path'])
         audio_array, sample_rate = librosa.load(audio_path, sr=16000)
+        
+        # Validate audio data to prevent NaN gradients
+        if np.isnan(audio_array).any() or np.isinf(audio_array).any():
+            raise ValueError(f"Invalid audio data (NaN/Inf) in {audio_path}")
+        if len(audio_array) == 0:
+            raise ValueError(f"Empty audio file: {audio_path}")
         
         # Process audio to get input features
         input_features = self.processor.feature_extractor(
@@ -367,11 +433,22 @@ class AudioTextDataset(Dataset):
             return_tensors="pt"
         ).input_features[0]
         
+        # Validate input_features to prevent NaN gradients
+        if torch.isnan(input_features).any() or torch.isinf(input_features).any():
+            raise ValueError(f"Invalid input_features (NaN/Inf) from {audio_path}")
+        
         # Process text to get labels - handle both 'text' and 'transcript' keys
+        # Use tokenizer __call__ method directly (faster for fast tokenizers)
         text = item.get('text', item.get('transcript', ''))
         if not text:
             raise ValueError(f"Neither 'text' nor 'transcript' key found in item: {item.keys()}")
-        labels = self.processor.tokenizer(text).input_ids
+        # Use __call__ method with padding=False since we'll pad in the collator
+        tokenized = self.processor.tokenizer(text, padding=False, return_tensors=None)
+        labels = tokenized["input_ids"]
+        
+        # Ensure labels are not empty
+        if len(labels) == 0:
+            raise ValueError(f"Empty labels for text: {text[:50]}...")
         
         return {
             "input_features": input_features,
@@ -434,7 +511,7 @@ def compute_wer_metrics(model, processor, eval_dataset, device):
     with torch.no_grad():
         for i, item in enumerate(tqdm(eval_dataset, desc="Evaluating")):
             # Get audio and text
-            audio_path = item['audio_path']
+            audio_path = _normalize_path_for_current_os(item['audio_path'])
             reference_text = item.get('text', item.get('transcript', ''))
             
             if not reference_text:
@@ -449,12 +526,13 @@ def compute_wer_metrics(model, processor, eval_dataset, device):
                     return_tensors="pt"
                 ).input_features.to(device)
                 
-                # Generate prediction
-                predicted_ids = model.generate(input_features)
+                # Generate prediction with same parameters as validation during training
+                predicted_ids = model.generate(input_features, max_length=128)
                 prediction = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
                 
-                predictions.append(prediction)
-                references.append(reference_text)
+                # Strip whitespace to match validation WER computation
+                predictions.append(prediction.strip())
+                references.append(reference_text.strip())
                 
             except Exception as e:
                 print(f"Error processing {audio_path}: {e}")
@@ -468,21 +546,136 @@ def compute_wer_metrics(model, processor, eval_dataset, device):
         return 1.0  # Return worst possible WER if no valid predictions
 
 
-def compute_metrics(eval_pred):
+def make_compute_metrics(processor):
     """
-    Compute metrics for evaluation.
-    This is called by the trainer during evaluation.
+    Create a compute_metrics function that has access to the processor.
+    This computes WER and makes it available for metric_for_best_model.
     """
-    predictions, labels = eval_pred
+    wer_metric = evaluate.load("wer")
     
-    # Return empty dict for now - WER will be computed by the callback
-    # The trainer will use this for logging
-    return {}
+    def compute_metrics(eval_pred):
+        """
+        Compute metrics for evaluation.
+        This is called by the trainer during evaluation.
+        """
+        predictions, labels = eval_pred
+        
+        # Handle predictions - they might be tensors, numpy arrays, or lists
+        if hasattr(predictions, 'cpu'):
+            # Tensor - convert to numpy
+            predictions = predictions.cpu().numpy()
+        elif isinstance(predictions, list):
+            # List of sequences - convert each to numpy array if needed
+            # Handle variable-length sequences by padding or processing individually
+            try:
+                predictions = np.array(predictions, dtype=object)
+            except (ValueError, TypeError):
+                # If it's a ragged array, keep as list
+                pass
+        elif not isinstance(predictions, np.ndarray):
+            try:
+                predictions = np.array(predictions)
+            except (ValueError, TypeError):
+                # If conversion fails, keep as is
+                pass
+        
+        # Handle labels similarly
+        if hasattr(labels, 'cpu'):
+            labels = labels.cpu().numpy()
+        elif isinstance(labels, list):
+            try:
+                labels = np.array(labels, dtype=object)
+            except (ValueError, TypeError):
+                pass
+        elif not isinstance(labels, np.ndarray):
+            try:
+                labels = np.array(labels)
+            except (ValueError, TypeError):
+                pass
+        
+        # Process predictions and labels - handle both arrays and lists
+        decoded_preds = []
+        decoded_labels = []
+        
+        # Get batch size
+        if isinstance(predictions, np.ndarray):
+            batch_size = predictions.shape[0]
+        elif isinstance(predictions, list):
+            batch_size = len(predictions)
+        else:
+            batch_size = 1
+        
+        # Decode each sequence individually to handle variable lengths
+        for i in range(batch_size):
+            try:
+                # Get prediction for this sample
+                if isinstance(predictions, np.ndarray):
+                    pred_seq = predictions[i]
+                else:
+                    pred_seq = predictions[i] if i < len(predictions) else []
+                
+                # Get label for this sample
+                if isinstance(labels, np.ndarray):
+                    label_seq = labels[i]
+                else:
+                    label_seq = labels[i] if i < len(labels) else []
+                
+                # Convert to list if needed
+                if hasattr(pred_seq, 'tolist'):
+                    pred_seq = pred_seq.tolist()
+                if hasattr(label_seq, 'tolist'):
+                    label_seq = label_seq.tolist()
+                
+                # Replace -100 in labels with pad_token_id
+                if isinstance(label_seq, (list, np.ndarray)):
+                    label_seq = [processor.tokenizer.pad_token_id if token == -100 else token for token in label_seq]
+                
+                # Decode
+                pred_text = processor.decode(pred_seq, skip_special_tokens=True).strip()
+                label_text = processor.decode(label_seq, skip_special_tokens=True).strip()
+                
+                # Only add non-empty pairs
+                if pred_text and label_text:
+                    decoded_preds.append(pred_text)
+                    decoded_labels.append(label_text)
+            except Exception as e:
+                # Skip this sample if there's an error
+                print(f"Warning: Error processing sample {i} in compute_metrics: {e}")
+                continue
+        
+        # Compute WER if we have valid pairs
+        if len(decoded_preds) > 0 and len(decoded_labels) > 0 and len(decoded_preds) == len(decoded_labels):
+            try:
+                wer = wer_metric.compute(predictions=decoded_preds, references=decoded_labels)
+                return {"eval_wer": wer}
+            except Exception as e:
+                print(f"Warning: Error computing WER: {e}")
+                return {"eval_wer": 1.0}
+        else:
+            return {"eval_wer": 1.0}  # Return worst WER if no valid pairs
+    
+    return compute_metrics
 
 
 def main():
-    # Configuration - Change this to your JSON file path
-    DATA_JSON_PATH = "D:\Afiq.hamidon\Lisan V2\organized_dataset.json"  # Update this path to your JSON file
+    # Accept dataset path via CLI and choose reasonable OS-specific default
+    import argparse
+    parser = argparse.ArgumentParser(description="Train Whisper LoRA")
+    parser.add_argument(
+        "--data_json",
+        type=str,
+        required=False,
+        help="Path to organized_dataset.json",
+    )
+    args = parser.parse_args()
+
+    if args.data_json:
+        DATA_JSON_PATH = args.data_json
+    else:
+        if os.name == "nt":
+            DATA_JSON_PATH = r"D:\Afiq.hamidon\Lisan V2\organized_dataset.json"
+        else:
+            DATA_JSON_PATH = "/mnt/d/Afiq.hamidon/Lisan V2/organized_dataset.json"
     
     # Initialize processor
     processor = WhisperProcessor.from_pretrained("openai/whisper-base", language="ms", task="transcribe")
@@ -498,9 +691,9 @@ def main():
         output_dir="checkpoints",  # Directory to save model checkpoints
         per_device_train_batch_size=1,  # Reduced batch size for memory
         gradient_accumulation_steps=8,  # Accumulate gradients for effective larger batch size
-        learning_rate=5e-5,  # Lower learning rate for stable training
+        learning_rate=1e-5,  # Reduced learning rate for stable training with 8-bit quantization
         warmup_steps=50,  # Warmup steps
-        num_train_epochs=10,  # Maximum number of training epochs (set to 10 for testing)
+        num_train_epochs=100,  # Maximum number of training epochs (set to 10 for testing)
         eval_strategy="epoch",  # Evaluate at the end of each epoch
         logging_strategy="steps",  # Log every few steps
         logging_first_step=True,  # Log the very first training step
@@ -517,8 +710,11 @@ def main():
         save_strategy="epoch",  # Save checkpoints at the end of each epoch
         save_total_limit=3,  # Keep only 3 best checkpoints
         load_best_model_at_end=True,  # Load best model at the end
-        metric_for_best_model="eval_loss",  # Use eval loss for best model selection
-        greater_is_better=False,  # Lower eval loss is better
+        metric_for_best_model="eval_wer",  # Use WER for best model selection
+        greater_is_better=False,  # Lower WER is better
+        gradient_checkpointing=True,  # Enable gradient checkpointing to save memory
+        gradient_checkpointing_kwargs={"use_reentrant": False},  # Use non-reentrant gradient checkpointing
+        max_grad_norm=1.0,  # Gradient clipping to prevent NaN gradients
     )
 
     # Load the Whisper model
@@ -557,9 +753,19 @@ def main():
     # Wrap the base model with LoRA
     model = get_peft_model(model, config)
     model.print_trainable_parameters()  # Print which parameters are trainable
+    
+    # Enable gradient checkpointing with use_reentrant=False to avoid warnings
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
+        # Set use_reentrant=False for checkpointing
+        if hasattr(model, "config"):
+            model.config.use_cache = False  # Disable cache when using gradient checkpointing
 
     # Create progress callback
     progress_callback = TrainingProgressCallback()
+    
+    # Create compute_metrics function with access to processor
+    compute_metrics_fn = make_compute_metrics(processor)
     
     # Initialize Hugging Face Trainer for training and evaluation with early stopping
     trainer = Seq2SeqTrainer(
@@ -568,7 +774,7 @@ def main():
         train_dataset=AudioTextDataset(data=train_data, processor=processor),
         eval_dataset=AudioTextDataset(data=test_data, processor=processor),
         data_collator=data_collator,
-        compute_metrics=compute_metrics,
+        compute_metrics=compute_metrics_fn,
         processing_class=processor.feature_extractor,
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.001),
